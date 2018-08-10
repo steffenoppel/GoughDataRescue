@@ -1,19 +1,110 @@
-######### ########################################
+##################################################
 ### DATA RESCUE OF GOUGH MONITORING DATA #########
 ##################################################
 
 ## written by steffen.oppel@rspb.org.uk
 ## support from Jaimie Cleeland (Gough Team 2017/2018)
 
-## main purpose is to rescue data inefficiently stored in hundreds of awful Excel files
+## main purpose is to rescue data that are inefficiently stored in hundreds of awful Excel files
 ## conversion into flat tables for import into database
 ## simplification and standardisation of terminology
+
+## first created 8 Aug 2018
 
 
 library(tidyverse)
 library(data.table)
 library(lubridate)
-library(xlsx)
+#library(xlsx)    ## does not work on RSPB machine due to JAVA conflict
+library(readxl)
+
+
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+## PART 1: FORMAT FROM CONSOLIDATED EXCEL FILES
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+
+
+#######READ IN MANUALLY COPIED DATABASE OF BREEDING DATA #####
+
+try(setwd("S:\\ConSci\\DptShare\\SteffenOppel\\RSPB\\UKOT\\Gough\\DATA"), silent=T)
+try(setwd("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\DATA"), silent=T)
+
+nests <- read_excel("BREEDING_DATABASE.xlsx", sheet="NEST_SUMMARIES")
+visits <- read_excel("BREEDING_DATABASE.xlsx", sheet="NEST_VISITS")
+colony <- read_excel("BREEDING_DATABASE.xlsx", sheet="COLONY_SUMMARIES")
+
+head(nests)
+
+head(colony)
+
+
+
+#### FORMAT NEST VISITS TO MATCH WITH DATABASE ###
+head(visits)
+
+
+### modify species abbreviations
+species<-unique(visits$Species)
+lkSpec<-data.frame(abbr=species, CODE=c("ATPE","BBPR","GOBU","SOAL","?","SOPE","SOPE","TRAL","UNK","AYNA","NRPE","GRSH","?"))
+visits<- visits %>% mutate(Species=lkSpec$CODE[match(Species,lkSpec$abbr)])
+
+
+### generate unique VisitID and NestID
+visits<- visits %>% mutate(VisitID=seq(10001,dim(visits)[1]+10000,1)) %>%
+  mutate(NestID=paste(Species,Year,Quadrat,ID_nest_burrow, sep="_"))
+
+
+### ASSESS MISSING CRITICAL INFO AND REMOVE WORTHLESS VISITS
+dim(visits)
+visits<- visits %>% filter(!is.na(STATUS)) ### %>% select(Species, Year, STAGE, ADULT, CONTENT, Comments,Notes)  ### remove visits where nest status is unknown
+dim(visits)
+
+
+### FORMAT THE MILLION STAGE DESCRIPTIONS INTO A FEW CATEGORIES
+lkStages<-data.frame(abbr=unique(visits$STAGE), STAGE=NA)
+lkStages<-lkStages %>%
+  mutate(STAGE=ifelse(grepl("build",abbr,perl=T,ignore.case = T)==T,"TERR",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("egg",abbr,perl=T,ignore.case = T)==T,"INCU",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("pip",abbr,perl=T,ignore.case = T)==T,"INCU",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("AIA",abbr,perl=T,ignore.case = T)==T,"INCU",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("chick",abbr,perl=T,ignore.case = T)==T,"CHIC",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("hatch",abbr,perl=T,ignore.case = T)==T,"CHIC",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("guard",abbr,perl=T,ignore.case = T)==T,"CHIC",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("brood",abbr,perl=T,ignore.case = T)==T,"CHIC",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("band",abbr,perl=T,ignore.case = T)==T,"CHIC",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("fledg",abbr,perl=T,ignore.case = T)==T,"FLED",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("dead",abbr,perl=T,ignore.case = T)==T,"FAIL",STAGE)) %>% 
+  mutate(STAGE=ifelse(grepl("carcass",abbr,perl=T,ignore.case = T)==T,"FAIL",STAGE)) %>% 
+  mutate(STAGE=ifelse(grepl("gone",abbr,perl=T,ignore.case = T)==T,"FLED",STAGE))
+
+
+
+### CREATE EXPORT OF NEST VISITS FOR DATABASE
+export<- visits %>% mutate(Time="12:00") %>%
+  mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abbr)]) %>%
+  mutate(Status=ifelse(STATUS==0,"Failed",ifelse(STAGE=="FLED","Fledged","Alive"))) %>%
+  mutate(Content=ifelse(CONTENT=="1",1,ifelse(CONTENT=="2",2,ifelse(CONTENT=="3",3,ifelse(CONTENT=="AIA",NA,0))))) %>%
+  mutate(Status=ifelse(CONTENT %in% c("Dead Chick","Broken Egg","x"),"Failed",Status)) %>%
+  mutate(Attendance=NA)%>% ### this is omitted for batch imports
+  mutate(FailureCause=Comments)%>% 
+  mutate(NOTES=Notes)%>% 
+  select(VisitID, NestID, Date, Time, Stage, Status, Content, Attendance, FailureCause,NOTES)
+
+head(export)
+fwrite(export,"Gough_nestVisits_export.csv")
+
+
+
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+## PART 2: FORMAT FROM RAW EXCEL FILES
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+
+
+
+
+
 
 # #Read in Atlantic Yellow-nosed albatross data
 # molly <- read.xlsx(file="/Users/jaimiec/Documents/Science Projects/Tristan Albatross Tracking/Gony monitoring colony 2017 - 2018.xlsx", sheetIndex = 1, header = T, stringsAsFactors=F)
