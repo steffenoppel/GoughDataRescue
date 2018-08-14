@@ -25,7 +25,8 @@ library(readxl)
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 
 
-#######READ IN MANUALLY COPIED DATABASE OF BREEDING DATA #####
+####### READ IN MANUALLY COPIED DATABASE OF BREEDING DATA #####
+### THIS REQUIRES MANUAL CONVERSION TO CSV AS THE DIFFERENT DATE FORMATS IN EXCEL SCREW EVERYTHING UP
 
 try(setwd("S:\\ConSci\\DptShare\\SteffenOppel\\RSPB\\UKOT\\Gough\\DATA"), silent=T)
 try(setwd("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\DATA"), silent=T)
@@ -42,7 +43,7 @@ head(colony)
 
 #### FORMAT NEST VISITS TO MATCH WITH DATABASE ###
 head(visits)
-
+str(visits)
 
 ### modify species abbreviations
 species<-unique(visits$Species)
@@ -93,6 +94,55 @@ export<- visits %>% mutate(Time="12:00") %>%
 
 head(export)
 fwrite(export,"Gough_nestVisits_export.csv")
+
+
+
+
+### CREATE MATCHING INVENTORY OF NESTS AND FINAL OUTCOME
+
+nests <- visits %>% mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abbr)]) %>%
+  mutate(Status=ifelse(STATUS==0,"Failed",ifelse(STAGE=="FLED","Fledged","Alive"))) %>%
+  mutate(Content=ifelse(CONTENT=="1",1,ifelse(CONTENT=="2",2,ifelse(CONTENT=="3",3,ifelse(CONTENT=="AIA",NA,0))))) %>%
+  mutate(Status=ifelse(CONTENT %in% c("Dead Chick","Broken Egg","x"),"Failed",Status)) %>%
+  mutate(Colony=ifelse((Colony %in% c(NA,"")),Transect,Colony)) %>%         ## fill in colony name from transect
+  mutate(Site=ifelse((Site %in% c(NA,"")),Quadrat,Site)) %>%         ## fill in site name from quadrat
+  arrange(Date) %>%  ## arrange in chronological order so we can extract summary infor for first and last nest visits
+  group_by(NestID, Species, Year, Colony, Site,Latitude, Longitude) %>%
+  summarise(DateFound=min(Date),StageFound=first(STAGE), DateLastChecked=max(Date), SUCCESS=last(STATUS))
+
+## update the LastAlive date
+
+DateLastAlive <- visits %>% mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abbr)]) %>%
+  mutate(Status=ifelse(STATUS==0,"Failed",ifelse(STAGE=="FLED","Fledged","Alive"))) %>%
+  mutate(Content=ifelse(CONTENT=="1",1,ifelse(CONTENT=="2",2,ifelse(CONTENT=="3",3,ifelse(CONTENT=="AIA",NA,0))))) %>%
+  mutate(Status=ifelse(CONTENT %in% c("Dead Chick","Broken Egg","x"),"Failed",Status)) %>%
+  filter(Status=="Alive") %>%   ## select only the alive nests
+  arrange(Date) %>%  ## arrange in chronological order so we can extract summary infor for first and last nest visits
+  group_by(NestID, Species, Year, Colony, Site) %>%
+  summarise(DateLastAlive=max(Date))
+
+
+nests <- merge(nests,DateLastAlive, by=c('NestID', 'Species', 'Year', 'Colony', 'Site'), all.x=T)
+
+ 
+
+### Troubleshoot the large number of missing dates
+
+visits %>% filter(is.na(Date))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
