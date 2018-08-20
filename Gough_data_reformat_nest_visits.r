@@ -10,6 +10,7 @@
 ## simplification and standardisation of terminology
 
 ## first created 8 Aug 2018
+## update on 14 Aug 2018 - requires conversion of Excel 'nest visits' tab into csv to avoid automated date conversion
 
 
 library(tidyverse)
@@ -32,7 +33,7 @@ try(setwd("S:\\ConSci\\DptShare\\SteffenOppel\\RSPB\\UKOT\\Gough\\DATA"), silent
 try(setwd("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\DATA"), silent=T)
 
 nests <- read_excel("BREEDING_DATABASE.xlsx", sheet="NEST_SUMMARIES")
-visits <- read_excel("BREEDING_DATABASE.xlsx", sheet="NEST_VISITS")
+#visits <- read_excel("BREEDING_DATABASE.xlsx", sheet="NEST_VISITS")
 colony <- read_excel("BREEDING_DATABASE.xlsx", sheet="COLONY_SUMMARIES")
 
 head(nests)
@@ -42,6 +43,26 @@ head(colony)
 
 
 #### FORMAT NEST VISITS TO MATCH WITH DATABASE ###
+# ## read in from converted csv file to hopefully rescue many of the dates
+# visits <- fread("BREEDING_DATABASE_NEST_VISITS.csv")
+# 
+# ### format the dates 
+# visits<- visits %>% mutate(DateOrig=Date) %>%
+#   mutate(DateGood=dmy(DateOrig))
+# 
+# ## check what went wrong:
+# visits %>% filter(is.na(DateGood)) %>% select(DateGood,DateOrig,Species,Site,Year)
+# 
+# ## remove all the date ranges:
+# visits %>% filter(is.na(DateGood)) %>% select(DateGood,DateOrig,Species,Site,Year) %>%
+#   mutate(DateModif=gsub(".*-","",DateOrig)) %>%
+#   mutate(DateGood=dmy(DateModif))
+
+## apply date formatting conversion to the whole data set
+visits <- fread("BREEDING_DATABASE_NEST_VISITS.csv")
+visits<- visits %>% mutate(DateOrig=gsub(".*-","",Date)) %>%
+  mutate(DateGood=dmy(DateOrig))
+visits %>% filter(is.na(DateGood)) %>% select(DateGood,DateOrig,Species,Site,Year)
 head(visits)
 str(visits)
 
@@ -90,7 +111,7 @@ export<- visits %>% mutate(Time="12:00") %>%
   mutate(Attendance=NA)%>% ### this is omitted for batch imports
   mutate(FailureCause=Comments)%>% 
   mutate(NOTES=Notes)%>% 
-  select(VisitID, NestID, Date, Time, Stage, Status, Content, Attendance, FailureCause,NOTES)
+  select(VisitID, NestID, DateGood, Time, Stage, Status, Content, Attendance, FailureCause,NOTES)
 
 head(export)
 fwrite(export,"Gough_nestVisits_export.csv")
@@ -106,9 +127,9 @@ nests <- visits %>% mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abbr)]) %>%
   mutate(Status=ifelse(CONTENT %in% c("Dead Chick","Broken Egg","x"),"Failed",Status)) %>%
   mutate(Colony=ifelse((Colony %in% c(NA,"")),Transect,Colony)) %>%         ## fill in colony name from transect
   mutate(Site=ifelse((Site %in% c(NA,"")),Quadrat,Site)) %>%         ## fill in site name from quadrat
-  arrange(Date) %>%  ## arrange in chronological order so we can extract summary infor for first and last nest visits
+  arrange(DateGood) %>%  ## arrange in chronological order so we can extract summary infor for first and last nest visits
   group_by(NestID, Species, Year, Colony, Site,Latitude, Longitude) %>%
-  summarise(DateFound=min(Date),StageFound=first(STAGE), DateLastChecked=max(Date), SUCCESS=last(STATUS))
+  summarise(DateFound=min(DateGood),StageFound=first(STAGE), DateLastChecked=max(DateGood), SUCCESS=last(STATUS))
 
 ## update the LastAlive date
 
@@ -117,9 +138,9 @@ DateLastAlive <- visits %>% mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abb
   mutate(Content=ifelse(CONTENT=="1",1,ifelse(CONTENT=="2",2,ifelse(CONTENT=="3",3,ifelse(CONTENT=="AIA",NA,0))))) %>%
   mutate(Status=ifelse(CONTENT %in% c("Dead Chick","Broken Egg","x"),"Failed",Status)) %>%
   filter(Status=="Alive") %>%   ## select only the alive nests
-  arrange(Date) %>%  ## arrange in chronological order so we can extract summary infor for first and last nest visits
+  arrange(DateGood) %>%  ## arrange in chronological order so we can extract summary infor for first and last nest visits
   group_by(NestID, Species, Year, Colony, Site) %>%
-  summarise(DateLastAlive=max(Date))
+  summarise(DateLastAlive=max(DateGood))
 
 
 nests <- merge(nests,DateLastAlive, by=c('NestID', 'Species', 'Year', 'Colony', 'Site'), all.x=T)
@@ -128,7 +149,7 @@ nests <- merge(nests,DateLastAlive, by=c('NestID', 'Species', 'Year', 'Colony', 
 
 ### Troubleshoot the large number of missing dates
 
-visits %>% filter(is.na(Date))
+visits %>% filter(is.na(DateGood))
 
 
 
