@@ -12,12 +12,18 @@
 ## first created 8 Aug 2018
 ## update on 14 Aug 2018 - requires conversion of Excel 'nest visits' tab into csv to avoid automated date conversion
 
+## 7 Sept 2018: major revisions to examine inherent logic of nest sequence visits
+## requires completeness check of visits as 'NA' create issues in processing
+
 
 library(tidyverse)
 library(data.table)
 library(lubridate)
 #library(xlsx)    ## does not work on RSPB machine due to JAVA conflict
 library(readxl)
+
+
+
 
 
 
@@ -60,6 +66,8 @@ head(colony)
 
 ## apply date formatting conversion to the whole data set
 visits <- fread("BREEDING_DATABASE_NEST_VISITS.csv")
+dim(visits)
+visits<-visits[,1:22]   ### eliminate blank columns at the end
 visits<- visits %>% mutate(DateOrig=gsub(".*-","",Date)) %>%
   mutate(DateGood=dmy(DateOrig))
 visits %>% filter(is.na(DateGood)) %>% select(DateGood,DateOrig,Species,Site,Year)
@@ -68,13 +76,17 @@ str(visits)
 
 ### modify species abbreviations
 species<-unique(visits$Species)
-lkSpec<-data.frame(abbr=species, CODE=c("ATPE","BBPR","GOBU","SOAL","?","SOPE","SOPE","TRAL","UNK","AYNA","NRPE","GRSH","?"))
+
+#visits %>% filter(Species=="") %>% dplyr::select(Directory,Year, Colony) ## to figure out what a species abbreviation might mean
+
+lkSpec<-data.frame(abbr=species, CODE=c("ATPE","BBPR","GOBU","SOAL","SOPE","SOPE","SOPE","TRAL","UNK","AYNA","NRPE","GRSH","AYNA","GRSH","TRAL"))
 visits<- visits %>% mutate(Species=lkSpec$CODE[match(Species,lkSpec$abbr)])
 
 
 ### generate unique VisitID and NestID
 visits<- visits %>% mutate(VisitID=seq(10001,dim(visits)[1]+10000,1)) %>%
-  mutate(NestID=paste(Species,Year,Quadrat,ID_nest_burrow, sep="_"))
+  mutate(Colony=ifelse((Colony %in% c(NA,"")),Transect,Colony)) %>%         ## fill in colony name from transect
+  mutate(NestID=paste(Species,Year,Colony,Quadrat,ID_nest_burrow, sep="_"))
 
 
 ### ASSESS MISSING CRITICAL INFO AND REMOVE WORTHLESS VISITS
@@ -97,25 +109,9 @@ lkStages<-lkStages %>%
   mutate(STAGE=ifelse(grepl("band",abbr,perl=T,ignore.case = T)==T,"CHIC",STAGE)) %>%
   mutate(STAGE=ifelse(grepl("fledg",abbr,perl=T,ignore.case = T)==T,"FLED",STAGE)) %>%
   mutate(STAGE=ifelse(grepl("dead",abbr,perl=T,ignore.case = T)==T,"FAIL",STAGE)) %>% 
-  mutate(STAGE=ifelse(grepl("carcass",abbr,perl=T,ignore.case = T)==T,"FAIL",STAGE)) %>% 
+  mutate(STAGE=ifelse(grepl("carcass",abbr,perl=T,ignore.case = T)==T,"FAIL",STAGE)) %>%
+  mutate(STAGE=ifelse(grepl("fail",tolower(abbr),perl=T,ignore.case = T)==T,"FAIL",STAGE)) %>% 
   mutate(STAGE=ifelse(grepl("gone",abbr,perl=T,ignore.case = T)==T,"FLED",STAGE))
-
-
-
-### CREATE EXPORT OF NEST VISITS FOR DATABASE
-export<- visits %>% mutate(Time="12:00") %>%
-  mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abbr)]) %>%
-  mutate(Status=ifelse(STATUS==0,"Failed",ifelse(STAGE=="FLED","Fledged","Alive"))) %>%
-  mutate(Content=ifelse(CONTENT=="1",1,ifelse(CONTENT=="2",2,ifelse(CONTENT=="3",3,ifelse(CONTENT=="AIA",NA,0))))) %>%
-  mutate(Status=ifelse(CONTENT %in% c("Dead Chick","Broken Egg","x"),"Failed",Status)) %>%
-  mutate(Attendance=NA)%>% ### this is omitted for batch imports
-  mutate(FailureCause=Comments)%>% 
-  mutate(NOTES=Notes)%>% 
-  select(VisitID, NestID, DateGood, Time, Stage, Status, Content, Attendance, FailureCause,NOTES)
-
-head(export)
-fwrite(export,"Gough_nestVisits_export.csv")
-
 
 
 
@@ -155,6 +151,172 @@ visits %>% filter(is.na(DateGood))
 
 
 
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+## PART 2: LOOP OVER EVERY NEST TO ENSURE CORRECT CLASSIFICATION OF OUTCOME 
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+
+head(nests)
+nests$NumberVisits<-0
+nests$MonitorDuration<-0
+nests$AssumedFledged<-0
+nests$LastStage<-NA
+nests$PROBLEM<-0
+cleanvisits<-data.frame()
+
+for (n in unique(nests$NestID)) {
+  
+  #### SELECT THE VISITS AND FORMAT THEM ###
+  #### requires difficult sequence of formatting depending on which columns contain information ###
+  
+  nv<-visits %>%     filter(NestID==n) %>%     select(Species,Island,Colony,Site,Year,Season,DateGood,Transect,Quadrat,ID_nest_burrow,STATUS,CONTENT,STAGE,ADULT,Comments) %>%
+    mutate(STAGE=ifelse(grepl("fledg",Comments,perl=T,ignore.case = T)==T,"Fledged",STAGE)) %>%
+    mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abbr)]) %>%
+    mutate(Stage=ifelse(CONTENT=="AIA","INCU",Stage)) %>%
+    #mutate(Status=ifelse(STATUS==0,"Failed",ifelse(Stage=="FLED","Fledged","Alive"))) %>%
+    mutate(Status=ifelse(STATUS==1,"Alive","Failed")) %>%
+    mutate(Status=ifelse(!is.na(Stage) & Stage=="FLED","Fledged",Status)) %>%
+    mutate(Stage=ifelse(!is.na(Status) & Status=="Failed","FAIL",Stage)) %>%
+    mutate(Content=ifelse(CONTENT=="1",1,ifelse(CONTENT=="2",2,ifelse(CONTENT=="3",3,ifelse(CONTENT=="AIA",NA,0))))) %>%
+    mutate(Status=ifelse(CONTENT %in% c("Dead Chick","Broken Egg","x"),"Failed",Status)) %>%
+    mutate(Status=ifelse(Content==0,ifelse(!is.na(Stage) & Stage=="FLED","Fledged","Failed"),ifelse(!is.na(Stage) & Stage=="FLED","Fledged",Status))) %>%
+    mutate(Stage=ifelse(is.na(Content),Stage,ifelse(Content==0,ifelse(!is.na(Status) & Status=="Fledged","FLED",Stage),ifelse(Status=="Fledged","FLED",Stage)))) %>%  ## This introduces NA for AIA because Content=NA
+    mutate(Status=ifelse(CONTENT=="AIA","Alive",Status)) %>%
+    mutate(Status=ifelse(!is.na(Stage) & Stage=="FLED","Fledged",Status)) %>%    ## this creates a problem if Stage is NA
+    mutate(Colony=ifelse((Colony %in% c(NA,"")),Transect,Colony)) %>%         ## fill in colony name from transect
+    mutate(Site=ifelse((Site %in% c(NA,"")),Quadrat,Site)) %>%         ## fill in site name from quadrat
+    arrange(DateGood) %>%
+    select(Species,Island,Colony,Site,Year,Season,DateGood,Transect,Quadrat,ID_nest_burrow,STATUS,CONTENT,STAGE,ADULT,Comments,Stage,Content,Status)
+  
+  #### IDENTIFY NESTS THAT HAVE NONSENSICAL SEQUENCE OF FAILURE -> CHICK or FLEDGED -> CHICK ###
+  ## if status went to 0 it should never go back to 1
+  ## however, if chick had wandered away then nest may have actually survived even if recorded as failed.
+  
+  ## FIRST, SELECT ONLY NESTS THAT WERE EVER ALIVE
+  if("Alive" %in% nv$Status){
+  
+  ## SECOND, REMOVE ALL STATUS=0 VISITS AT THE BEGINNING (BEFORE A NEST ACTUALLY EXISTS)
+  nvisits<-dim(nv)[1]
+  start<-which(nv$Status=="Alive")[1]
+  nv<-nv[start:nvisits,]
+  
+  ## CHECK FOR ALL OTHER ISSUES
+  if("FLED" %in% nv$Stage){
+    nv<-nv[1:which(nv$Stage=="FLED")[1],] ## eliminate all visits after a nest had fledged
+  }
+  nv$STATUS<-ifelse(nv$Status=="Alive",1,0)
+  statusseq<-nv %>% mutate(sequence=as.numeric(STATUS)-lag(as.numeric(STATUS),default=1)) %>% select(sequence)
+  statusseq$sequence[is.na(statusseq$sequence)]<-0
+  if(max(statusseq$sequence, na.rm=T)>0){
+    ## find the visits when the nest suddenly was resuscitated
+    resusindex<-which(statusseq$sequence > 0)[1]
+    nvisits<-dim(nv)[1]
+    nvR<- nv[resusindex:nvisits,]
+    
+    ## if the resuscitation only ever recorded an adult, delete these visits
+    if(max(nvR$CONTENT)==0 & max(nvR$ADULT)>0){
+      nv<-nv[(1:(resusindex-1)),]
+    }
+    
+    ## if the resuscitation found an actual chick, delete the visit that reported failure   
+    if(max(nvR$CONTENT)>0 & "CHIC" %in% nvR$Stage){
+      nv<-nv[-(resusindex-1),]
+    }
+    
+    ## if the number of visits after resuscitation are more than before, then retain only the    
+    if(dim(nvR)[1] > dim(nv[start:resusindex,])[1]){
+      nv<-nvR
+    }
+  }
+  
+  #### REMOVE REDUNDANT VISITS AFTER FAILURE OR FLEDGING ###
+  if("Failed" %in% nv$Status | "FLED" %in% nv$Stage){
+    termdate<-min(nv$DateGood[nv$Status=="Failed" | nv$Stage=="FLED"], na.rm=T)
+  }else{
+    termdate<-max(nv$DateGood, na.rm=T)
+  }
+  
+  nv <- nv %>% filter(DateGood <= termdate)
+  nests$SUCCESS[nests$NestID==n]<-nv$STATUS[nv$DateGood==termdate]
+  
+  #### FLEDGED NESTS ARE SUCCESSFUL ####
+  if ("FLED" %in% nv$Stage){nests$SUCCESS[nests$NestID==n]<-1}
+  
+  #### FILL IN SIMPLE METRICS FOR THE NESTS ###
+  nests$DateLastAlive[nests$NestID==n]<-max(nv$DateGood[nv$Status=="Alive"])
+  nests$NumberVisits[nests$NestID==n]<-dim(nv)[1]
+  nests$MonitorDuration[nests$NestID==n]<-as.numeric(difftime(if_else(0 %in% nv$STATUS,min(nv$DateGood[nv$STATUS==0]),max(nv$DateGood)),min(nv$DateGood),'days'))
+  nests$AssumedFledged[nests$NestID==n]<-ifelse("FLED" %in% nv$Stage,0,1)
+  nests$LastStage[nests$NestID==n]<-last(nv$Stage)
+  
+  #### COPY THE RETAINED CLEAN NEST VISITS INTO A NEW DATA FRAME ###
+  cleanvisits<-rbind(cleanvisits,nv)
+  
+
+  ##### IDENTIFY PROBLEM NESTS WHERE SUCCESS DOES NOT MATCH WITH NEST VISITS
+  if(nests$SUCCESS[nests$NestID==n]==1){
+    nests$PROBLEM[nests$NestID==n]<-ifelse("FAIL" %in% nv$Stage | "Failed" %in% nv$Status,1,0)  ##removed  | 0 %in% nv$STATUS,1,0 because 0 is also for fledged nests
+  }
+  
+  if(nests$SUCCESS[nests$NestID==n]==0){
+    nests$PROBLEM[nests$NestID==n]<-max(ifelse(grepl("fledg",nv$Comments,perl=T,ignore.case = T)==T,1,0))
+  }
+  
+  ## REMOVE ALL NESTS THAT NEVER EXISTED (unoccupied burrows)
+  }else{nests<-nests[!nests$NestID==n,]}
+
+  
+  
+    
+}   ## end of loop across all nests
+
+
+
+
+
+######### INSPECT ALL THE PROBLEM NESTS ###########
+
+probvis<-nests %>% filter(PROBLEM==1) %>% select(NestID)
+n=probvis[1,1]
+
+
+
+
+
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+## PART 3: CREATE EXPORT OF NEST VISITS FOR DATABASE
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+
+head(cleanvisits)
+
+export<- cleanvisits %>% mutate(Time="12:00") %>%
+  mutate(NestID=paste(Species,Year,Colony,Quadrat,ID_nest_burrow, sep="_")) %>% 
+  mutate(Attendance=ADULT)%>% ### this is just a number and no ring info
+  mutate(FailureCause=Comments)%>% 
+  mutate(NOTES="NA") %>%
+  mutate(VisitID=seq(1,dim(cleanvisits)[1]),1)%>%
+  select(VisitID, NestID, DateGood, Time, Stage, Status, Content, Attendance, FailureCause,NOTES)
+
+head(export)
+dim(export)
+#fwrite(export,"Gough_nestVisits_export.csv")
+
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+## PART 4: CREATE EXPORT OF NESTS FOR DATABASE
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+
+head(nests)
+dim(nests)
+
+exportNEST<- nests %>% mutate(Time="12:00") %>%
+  mutate(Nest_label=NestID) %>% 
+  mutate(Completed=ifelse(AssumedFledged==1,0,1))%>%
+  select(Nest_label,Species,Year,Colony,Site,Latitude,Longitude,DateFound,StageFound, DateLastAlive, DateLastChecked,SUCCESS,Completed,LastStage)
+
+head(exportNEST)
+dim(exportNEST)
+fwrite(exportNEST,"Gough_nests_export.csv")
 
 
 
@@ -169,10 +331,10 @@ visits %>% filter(is.na(DateGood))
 
 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
-## PART 2: FORMAT FROM RAW EXCEL FILES
+## PART X: FORMAT FROM RAW EXCEL FILES
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 
-
+### provided by Jaimie Cleeland
 
 
 
