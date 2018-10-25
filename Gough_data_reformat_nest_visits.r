@@ -125,7 +125,7 @@ nests <- visits %>% mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abbr)]) %>%
   mutate(Site=ifelse((Site %in% c(NA,"")),Quadrat,Site)) %>%         ## fill in site name from quadrat
   arrange(DateGood) %>%  ## arrange in chronological order so we can extract summary infor for first and last nest visits
   group_by(NestID, Species, Year, Colony, Site,Latitude, Longitude) %>%
-  summarise(DateFound=min(DateGood),StageFound=first(STAGE), DateLastChecked=max(DateGood), SUCCESS=last(STATUS))
+  summarise(DateFound=min(DateGood),StageFound=first(Stage), DateLastChecked=max(DateGood), SUCCESS=last(STATUS))
 
 ## update the LastAlive date
 
@@ -134,6 +134,7 @@ DateLastAlive <- visits %>% mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abb
   mutate(Content=ifelse(CONTENT=="1",1,ifelse(CONTENT=="2",2,ifelse(CONTENT=="3",3,ifelse(CONTENT=="AIA",NA,0))))) %>%
   mutate(Status=ifelse(CONTENT %in% c("Dead Chick","Broken Egg","x"),"Failed",Status)) %>%
   filter(Status=="Alive") %>%   ## select only the alive nests
+  mutate(Site=ifelse((Site %in% c(NA,"")),Quadrat,Site)) %>%         ## fill in site name from quadrat
   arrange(DateGood) %>%  ## arrange in chronological order so we can extract summary infor for first and last nest visits
   group_by(NestID, Species, Year, Colony, Site) %>%
   summarise(DateLastAlive=max(DateGood))
@@ -319,7 +320,7 @@ dim(exportNEST)
 fwrite(exportNEST,"Gough_nests_export.csv")
 
 
-
+save.image("GOUGH_nest_data.RData")
 
 
 
