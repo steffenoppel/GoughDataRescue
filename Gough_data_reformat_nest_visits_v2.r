@@ -22,6 +22,8 @@
 ### erroneous use of Content=0 when content was not seen (i.e. AON)
 
 
+##### modified on 25 Oct 2018 to read in data copied in Sept/Oct
+
 
 library(tidyverse)
 library(data.table)
@@ -35,33 +37,35 @@ library(readxl)
 ## PART 1: ASSESS EXTENT OF PROBLEM
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 ## only need to re-run after changes to database
-system(paste0(Sys.getenv("R_HOME"), "/bin/i386/Rscript.exe ", shQuote("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\ANALYSIS\\SeabirdBreedingSuccess\\RODBC_nest_import.r")), wait = FALSE, invisible = FALSE)
+#system(paste0(Sys.getenv("R_HOME"), "/bin/i386/Rscript.exe ", shQuote("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\ANALYSIS\\SeabirdBreedingSuccess\\RODBC_nest_import.r")), wait = FALSE, invisible = FALSE)
 
-try(setwd("S:\\ConSci\\DptShare\\SteffenOppel\\RSPB\\UKOT\\Gough\\ANALYSIS\\SeabirdBreedingSuccess"), silent=T)
+#try(setwd("S:\\ConSci\\DptShare\\SteffenOppel\\RSPB\\UKOT\\Gough\\ANALYSIS\\SeabirdBreedingSuccess"), silent=T)
 try(setwd("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\ANALYSIS\\SeabirdBreedingSuccess"), silent=T)
 load("GOUGH_nest_data.RData")
 head(nestsDB)
 head(visDB)
 
 
-##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 ## CREATE SUMMARY AND SELECT SPECIES AND YEAR WHERE SUCCESS ==0
-##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+### CHECK WHETHER ERRONEOUS DATA EXIST IN DATABASE
+## disabled after maintenance on 17 OCT fixed most issues
 
-summary<-nestsDB %>% mutate(n=1) %>%
-  mutate(SUCCESS=as.numeric(SUCCESS)) %>%
-  group_by(Species, Year,Colony) %>%
-  summarise(SampSize=sum(n), Success=mean(SUCCESS, na.rm=T))
+# summary<-nestsDB %>% mutate(n=1) %>%
+#   mutate(SUCCESS=as.numeric(SUCCESS)) %>%
+#   group_by(Species, Year,Colony) %>%
+#   summarise(SampSize=sum(n), Success=mean(SUCCESS, na.rm=T))
+# 
+# suspicious<-summary %>%
+#   filter(Success %in% c(0,1)) %>%
+#   filter(SampSize>5) %>%
+#   filter(Year<2018)
+# dim(suspicious)
+# suspicious
 
-suspicious<-summary %>%
-  filter(Success %in% c(0,1)) %>%
-  filter(SampSize>5) %>%
-  filter(Year<2018)
-dim(suspicious)
-suspicious
 
-
-fwrite(suspicious,"ERRONEOUS_IMPORT_DATA.csv")
+#fwrite(suspicious,"ERRONEOUS_IMPORT_DATA.csv")
 
 
 
@@ -75,14 +79,14 @@ fwrite(suspicious,"ERRONEOUS_IMPORT_DATA.csv")
 ####### READ IN MANUALLY COPIED DATABASE OF BREEDING DATA #####
 ### THIS REQUIRES MANUAL CONVERSION TO CSV AS THE DIFFERENT DATE FORMATS IN EXCEL SCREW EVERYTHING UP
 
-try(setwd("S:\\ConSci\\DptShare\\SteffenOppel\\RSPB\\UKOT\\Gough\\DATA"), silent=T)
-try(setwd("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\DATA"), silent=T)
+#try(setwd("S:\\ConSci\\DptShare\\SteffenOppel\\RSPB\\UKOT\\Gough\\DATA"), silent=T)
+try(setwd("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\DATA\\GoughDataRescue"), silent=T)
 
-nests <- read_excel("BREEDING_DATABASE.xlsx", sheet="NEST_SUMMARIES")
-visits <- fread("BREEDING_DATABASE_NEST_VISITS.csv")
+#nests <- read_excel("BREEDING_DATABASE.xlsx", sheet="NEST_SUMMARIES")
+visits <- fread("BREEDING_DATABASE_NEW_RED.csv")
 dim(visits)
-visits<-visits[,1:22]   ### eliminate blank columns at the end
-head(nests)
+visits<-visits[54993:dim(visits)[1],1:22]   ### eliminate blank columns at the end and already imported visits
+#head(nests)
 
 
 ## apply date formatting conversion to the whole data set
@@ -93,13 +97,21 @@ head(visits)
 str(visits)
 
 ### modify species abbreviations
+## needed to be updated after list was extended [25 Oct 2018]
+### check weird species abbr
+#visits %>% filter(Species %in% c("e","S","small","S (=small)")) %>% select(Colony, Year, Species, Filename)
+
 species<-unique(visits$Species)
-lkSpec<-data.frame(abbr=species, CODE=c("ATPE","BBPR","GOBU","SOAL","SOPE","SOPE","SOPE","TRAL","UNK","AYNA","NRPE","GRSH","AYNA","GRSH","TRAL"))
+lkSpec<-data.frame(abbr=species, CODE=c("GRSH","SOPE","ATPE","UNK","UNK","UNK","SGPE","BBPR","MAPR","AYNA","UNK","GRPE","ANTE"))
 visits<- visits %>% mutate(Species=lkSpec$CODE[match(Species,lkSpec$abbr)])
 
 
 ### generate unique VisitID and NestID
-visits<- visits %>% mutate(VisitID=seq(10001,dim(visits)[1]+10000,1)) %>%
+startID<-max(visDB$VisitID)+1
+visits$VisitID<-seq(startID,max(visDB$VisitID)+dim(visits)[1],1)
+
+visits<- visits %>%     ### removed: mutate(VisitID=seq(10001,dim(visits)[1]+10000,1)) %>%
+  mutate(Transect=ifelse((Transect %in% c(NA,"")),Site,Transect)) %>%         ## fill in site name from quadrat
   mutate(Colony=ifelse((Colony %in% c(NA,"")),Transect,Colony)) %>%         ## fill in colony name from transect
   mutate(NestID=paste(Species,Year,Colony,Quadrat,ID_nest_burrow, sep="_"))
 
@@ -144,9 +156,6 @@ lkStages<-lkStages %>%
 
 
 
-
-
-
 ### CREATE MATCHING INVENTORY OF NESTS AND FINAL OUTCOME
 
 nests <- visits %>% mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abbr)]) %>%
@@ -184,23 +193,32 @@ visits %>% filter(is.na(DateGood))
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 ## PART 3: SELECT ONLY THOSE NESTS FROM TROUBLE SPECIES / YEAR / COLONY 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
-suspicious$GROUP<-paste(suspicious$Species,suspicious$Year,ifelse(is.na(suspicious$Colony),"",suspicious$Colony), sep="_")
-suspicious$GROUP
 
-head(visits)
-visits$GROUP<-paste(visits$Species,visits$Year,visits$Colony, sep="_")
-visRED<-visits %>% filter(GROUP %in% suspicious$GROUP)
-dim(visRED)
+#### disabled after maintenance fixed issues 16 Oct 2018
 
-nests$GROUP<-paste(nests$Species,nests$Year,nests$Colony, sep="_")
-nestsRED<-nests %>% filter(GROUP %in% suspicious$GROUP)
+# suspicious$GROUP<-paste(suspicious$Species,suspicious$Year,ifelse(is.na(suspicious$Colony),"",suspicious$Colony), sep="_")
+# suspicious$GROUP
+# 
+# head(visits)
+# visits$GROUP<-paste(visits$Species,visits$Year,visits$Colony, sep="_")
+# visRED<-visits %>% filter(GROUP %in% suspicious$GROUP)
+# dim(visRED)
+# 
+# nests$GROUP<-paste(nests$Species,nests$Year,nests$Colony, sep="_")
+# nestsRED<-nests %>% filter(GROUP %in% suspicious$GROUP)
+# dim(nestsRED)
+
+dim(nests)
+nestsRED<-nests %>%     ## filter(!(NestID %in% nestsDB$Nest_label)) %>% this step was completed manually because the script was changed after data had been imported, leading to non-matching IDs
+  filter(!Species=="UNK")
 dim(nestsRED)
+head(nestsRED)
+
 
 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 ## PART 4: LOOP OVER EVERY NEST TO ENSURE CORRECT CLASSIFICATION OF OUTCOME 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
-
 
 ### NOT YET FIXED
 ### stumbled over ATPE_2012_BlechnumBridge_26_34, which is success==0, but not in database !!!???
@@ -220,13 +238,13 @@ for (n in unique(nestsRED$NestID)) {
   #### requires difficult sequence of formatting depending on which columns contain information ###
   
   nv<-visits %>%     filter(NestID==n) %>%     select(Species,Island,Colony,Site,Year,Season,DateGood,Transect,Quadrat,ID_nest_burrow,STATUS,CONTENT,STAGE,ADULT,Comments) %>%
-    mutate(STAGE=ifelse(grepl("fledg",Comments,perl=T,ignore.case = T)==T,"Fledged",STAGE)) %>%
+    mutate(STAGE=ifelse(grepl("fledg",Comments,perl=T,ignore.case = T)==T,"fledged",STAGE)) %>%
     
     mutate(CONTENT=ifelse(CONTENT==0 & STATUS==1 & ADULT>0,"AIA",CONTENT)) %>%         ### THIS LINE REPLACES ERRONEOUS 0 in CONTENT
     mutate(Stage=lkStages$STAGE[match(STAGE,lkStages$abbr)]) %>%
     mutate(Stage=ifelse(CONTENT=="AIA","INCU",Stage)) %>%
     #mutate(Status=ifelse(STATUS==0,"Failed",ifelse(Stage=="FLED","Fledged","Alive"))) %>%
-    mutate(Status=ifelse(STATUS==1,"Alive","Failed")) %>%
+    mutate(Status=ifelse(STATUS==1,"Alive",ifelse(STAGE=="fledged","Fledged","Failed"))) %>%
     mutate(Status=ifelse(!is.na(Stage) & Stage=="FLED","Fledged",Status)) %>%
     mutate(Stage=ifelse(!is.na(Status) & Status=="Failed","FAIL",Stage)) %>%
     mutate(Content=ifelse(CONTENT=="1",1,ifelse(CONTENT=="2",2,ifelse(CONTENT=="3",3,ifelse(CONTENT=="AIA",NA,0))))) %>%
@@ -346,27 +364,74 @@ dim(nestsRED)
 
 ### create table matching the database
 exportNEST<- nestsRED %>% mutate(Time="12:00") %>%
-  mutate(Nest_label=NestID) %>% 
+  mutate(Nest_label=gsub("[-/' ]","" , NestID,ignore.case = TRUE)) %>% ### COMPLY WITH NEST LABEL STANDARDS - REMOVE ALL BLANKS AND SPECIAL SYMBOLS
   mutate(Completed=ifelse(AssumedFledged==1,0,1))%>%
   select(Nest_label,Species,Year,Colony,Site,Latitude,Longitude,DateFound,StageFound, DateLastAlive, DateLastChecked,LastStage,Completed,SUCCESS)
 
+### FIX LOCATIONS FOR KNOWN SPECIES ###
 
-### match to check which nests already exist
-head(nestsDB)
+exportNEST$Site[exportNEST$Species=="SGPE"]<-exportNEST$Colony[exportNEST$Species=="SGPE"]
+exportNEST$Colony[exportNEST$Species=="SGPE"]<-"Low Hump"
+exportNEST$Colony[exportNEST$Species=="GRPE"]<-"Gonydale"
+exportNEST$Colony[exportNEST$Species=="GRPE"]<-"Area 1"
+exportNEST$Site[exportNEST$Species=="MAPR"]<-exportNEST$Colony[exportNEST$Species=="MAPR"]
+exportNEST$Colony[exportNEST$Species=="MAPR"]<-"Prion Cave"
+exportNEST$Site[exportNEST$Species=="BBPR"]<-exportNEST$Colony[exportNEST$Species=="BBPR"]
+
+#exportNEST %>% filter(Species=="SOPE") %>% select(Colony,Site)
+
+
+
+### identify locations not in database
+usedlocs<-unique(exportNEST$Colony)
+newlocs<-usedlocs[!(usedlocs %in% locDB$LocationName)]
+newlocs<-data.frame(bullshit=newlocs, LOCATION=NA)
+newlocs<-newlocs %>%
+  mutate(LOCATION=ifelse(grepl("Rivercrossing",bullshit,perl=T,ignore.case = T)==T,"Unknown",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("by paint store",bullshit,perl=T,ignore.case = T)==T,"Weather station",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("by Sagina shed",bullshit,perl=T,ignore.case = T)==T,"Weather station",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("in front of food store",bullshit,perl=T,ignore.case = T)==T,"Weather station",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("in front of lab",bullshit,perl=T,ignore.case = T)==T,"Weather station",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("Prion Cave",bullshit,perl=T,ignore.case = T)==T,"Prion Cave",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("to left of Skivvygat",bullshit,perl=T,ignore.case = T)==T,"Weather station",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("Blechnam bridge",bullshit,perl=T,ignore.case = T)==T,"Blechnum Bridge",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("Golden highway",bullshit,perl=T,ignore.case = T)==T,"Golden Highway",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("study",bullshit,perl=T,ignore.case = T)==T,"Unknown",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("control",bullshit,perl=T,ignore.case = T)==T,"Unknown",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("Area 3",bullshit,perl=T,ignore.case = T)==T,"Area 3",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("GLS Study Colony",bullshit,perl=T,ignore.case = T)==T,"Between the base and seal beach",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("inland Adm path",bullshit,perl=T,ignore.case = T)==T,"Admirals",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("area 2",bullshit,perl=T,ignore.case = T)==T,"Area 2",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("Seal Beach",bullshit,perl=T,ignore.case = T)==T,"Seal Beach",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("Snoekgat",bullshit,perl=T,ignore.case = T)==T,"Snoekgat",LOCATION)) %>%
+  mutate(LOCATION=ifelse(grepl("Tumbledown",tolower(bullshit),perl=T,ignore.case = T)==T,"Tumbledown",LOCATION)) %>% 
+  mutate(LOCATION=ifelse(grepl("Low Hump",tolower(bullshit),perl=T,ignore.case = T)==T,"Low Hump",LOCATION)) %>% 
+  mutate(LOCATION=ifelse(grepl("by balloon balcony",tolower(bullshit),perl=T,ignore.case = T)==T,"Weather station",LOCATION))
+  
+
+
+
+### UPDATE LOCATIONS IN SURVEYS
+
+exportNEST<- exportNEST %>% mutate(Site=ifelse(Site %in% c("",NA),Colony,Site)) %>%
+  mutate(Colony=ifelse(Colony %in% locDB$LocationName,Colony,newlocs$LOCATION[match(Colony,newlocs$bullshit)]))
 head(exportNEST)
 
-updNests<-exportNEST %>% filter(Nest_label %in% nestsDB$Nest_label)
-updNestsDB<-nestsDB %>% filter(Nest_label %in% updNests$Nest_label)
-updNests[!(updNests$SUCCESS==updNestsDB$SUCCESS),]      ### these nests differe between the output here and the DB and need to be updated
+
+
+### match to check which nests already exist
+# head(nestsDB)
+# head(exportNEST)
+# updNests<-exportNEST %>% filter(Nest_label %in% nestsDB$Nest_label)
+# updNestsDB<-nestsDB %>% filter(Nest_label %in% updNests$Nest_label)
+# updNests[!(updNests$SUCCESS==updNestsDB$SUCCESS),]      ### these nests differ between the output here and the DB and need to be updated
 
 ### export the nests that need to be updated
-fwrite(updNests[!(updNests$SUCCESS==updNestsDB$SUCCESS),],"Gough_Nests_tobe_updated.csv")
-
-exportNEST %>% filter(Species=="AYNA")
+#fwrite(updNests[!(updNests$SUCCESS==updNestsDB$SUCCESS),],"Gough_Nests_tobe_updated.csv")
 
 
 ### export the nests that need to be added
-addNests<-exportNEST %>% filter(!(Nest_label %in% nestsDB$Nest_label))
+addNests<-exportNEST ##%>% filter(!(Nest_label %in% nestsDB$Nest_label)) ## we hope to have excluded that manually
 fwrite(addNests,"Gough_Nests_tobe_added.csv")
 
 
@@ -387,34 +452,37 @@ export<- cleanvisits %>% mutate(Time="12:00") %>%
 
 
 dim(export)
+fwrite(export,"Gough_nestVisits_tobe_added.csv")
 
 
 
-#### REMOVE THE VISITS THAT ALREADY EXIST IN THE DB WITH THE SAME STATUS #######
-head(export)
-head(visDB)
-visDB$Nest_label<-nestsDB$Nest_label[match(visDB$NestID,nestsDB$NestID)]
-existingvis<-visDB[,c(12,3,6)]
-names(existingvis)<-names(export)[c(2,3,6)]
-existingvis$IN_DB<-1
-export<-merge(export,existingvis, by=c(names(export)[c(2,3,6)]), all.x=T)
-dim(export)
-export<-export[is.na(export$IN_DB),]
-dim(export)
-
-#### IDENTIFY VISITS THAT EXIST IN THE DB BUT NEED STATUS UPDATE #######
-names(existingvis)[3]<-"Status_DB"
-export$IN_DB<-NULL
-export<-merge(export,existingvis, by=c("NestID","DateGood"), all.x=T)
-dim(export)
-upd_visits<-export[!is.na(export$IN_DB),]
-add_visits<-export[is.na(export$IN_DB),]
-dim(upd_visits)
-dim(add_visits)
-
-fwrite(upd_visits,"Gough_nestVisits_tobe_updated.csv")
-fwrite(add_visits,"Gough_nestVisits_tobe_added.csv")
-
+#### SECTION BELOW REMOVED 28 Oct 2018 ################
+# 
+# #### REMOVE THE VISITS THAT ALREADY EXIST IN THE DB WITH THE SAME STATUS #######
+# head(export)
+# head(visDB)
+# visDB$Nest_label<-nestsDB$Nest_label[match(visDB$NestID,nestsDB$NestID)]
+# existingvis<-visDB[,c(12,3,6)]
+# names(existingvis)<-names(export)[c(2,3,6)]
+# existingvis$IN_DB<-1
+# export<-merge(export,existingvis, by=c(names(export)[c(2,3,6)]), all.x=T)
+# dim(export)
+# export<-export[is.na(export$IN_DB),]
+# dim(export)
+# 
+# #### IDENTIFY VISITS THAT EXIST IN THE DB BUT NEED STATUS UPDATE #######
+# names(existingvis)[3]<-"Status_DB"
+# export$IN_DB<-NULL
+# export<-merge(export,existingvis, by=c("NestID","DateGood"), all.x=T)
+# dim(export)
+# upd_visits<-export[!is.na(export$IN_DB),]
+# add_visits<-export[is.na(export$IN_DB),]
+# dim(upd_visits)
+# dim(add_visits)
+# 
+# fwrite(upd_visits,"Gough_nestVisits_tobe_updated.csv")
+# fwrite(add_visits,"Gough_nestVisits_tobe_added.csv")
+# 
 
 
 
