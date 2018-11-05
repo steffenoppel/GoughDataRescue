@@ -138,9 +138,52 @@ summvert$Colony[is.na(summvert$Colony)]<-"Unknown"
 
 
 
-         
+
+
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
-## PART 5: SPLIT THE TABLE INTO THE RIGHT FORMAT - SURVEYS AND COUNTS 
+## PART 5: INSERT MISSING DATES BY TAKING AVERAGE OF PREVIOUS YEARS 
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+
+summvert <- summvert %>% mutate(Date=dmy(DATE))
+
+### FOR TRISTAN ALBATROSS, COUNTS OF ADULT ARE THE SAME AS AON
+summvert$COHORT[summvert$Species=="TRAL" & summvert$COHORT=="AD"]<-"AON"
+
+### summarise count dates for known data
+knowndates<- summvert %>% select(Species,Colony,COHORT, Year,N, Date) %>%
+  mutate(day=day(Date),month=month(Date)) %>%
+  group_by(Species,COHORT,Colony) %>%
+  summarise(mean_month=round(mean(month,na.rm=T),0),mean_day=round(mean(day,na.rm=T),0))
+
+knowndates %>% filter(is.na(mean_month))
+summvert %>% filter(Species=="TRAL") %>% filter(COHORT=="AD")
+unique(knowndates$COHORT[knowndates$Species=="TRAL"])
+
+### IMPUTE DATES FOR UNKNOWN DATA
+
+unknowns<-summvert %>% filter(is.na(Date)) %>% select(Species,Colony,COHORT, Year) %>%
+  left_join(knowndates,by=c("Species","Colony","COHORT")) %>%
+  mutate(Date=dmy(paste(mean_day,mean_month,Year, sep="/"))) %>%
+  arrange(Species, Colony, COHORT,Year)
+unknowns
+dim(unknowns)
+
+
+### INSERT THE CREATED DATES BACK INTO THE OVERALL TABLE
+summvert <- summvert %>% arrange(Date,Species, Colony, COHORT,Year)
+misscols<-is.na(summvert$Date)
+summvert$Date[misscols] <- unknowns$Date  ### this is a dangerous replacement as it relies on identical sort order
+
+
+# summvert$Date[misscols] <- summvert[is.na(summvert$Date),] %>%      
+#   left_join(unknowns,by=c("Species","Colony","Year","COHORT")) %>%        ### DID NOT WORK BECAUSE JOIN CREATED MORE ROWS
+#   select(Date.y)
+
+
+
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+## PART 6: SPLIT THE TABLE INTO THE RIGHT FORMAT - SURVEYS AND COUNTS 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 
 unique(summvert$N)
@@ -174,7 +217,7 @@ head(counts)
 
 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
-## PART 6: CREATE EXPORT OF NEST VISITS FOR DATABASE
+## PART 7: CREATE EXPORT OF NEST VISITS FOR DATABASE
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 
 fwrite(surveys,"Gough_surveys_tobe_added.csv")
@@ -185,13 +228,34 @@ fwrite(counts,"Gough_counts_tobe_added.csv")
 
 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
-## PART 7: SUMMARY TO CHECK FOR DATA GAPS
+## PART 8: SUMMARY TO CHECK FOR DATA GAPS
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 
+### by colony - this is almost impossible to look through
 SUMMARY<- summvert %>% group_by(Species,Colony,Year,COHORT) %>%
   summarise(N=sum(N, na.rm=T)) %>%
   spread(COHORT,N)
 SUMMARY
 
 
+### BY SPECIES AND YEAR
+SUMMARY<- summvert %>% group_by(Species,Year,COHORT) %>%
+  summarise(N=sum(N, na.rm=T)) %>%
+  spread(COHORT,N)
+SUMMARY
 
+
+### CREATE FULL LIST OF SPECIES AND YEAR AND FLAG UP MISSING DATA
+full<-expand.grid(Species=unique(summvert$Species),Year=unique(summvert$Year))
+
+MISSING<-full %>% filter(Year>1999) %>%
+  left_join(SUMMARY,by=c("Species","Year")) %>%
+  mutate(nothing=ifelse(is.na(AD) & is.na(AON) & is.na(CHIC) & is.na(EGG) & is.na(INCU),1,0)) %>%
+  filter(nothing==1) %>% select(Species,Year) %>%
+  filter(Species!="GRPE") %>%
+  arrange(Species, Year)
+
+MISSING
+
+fwrite(MISSING,"Gough_missing_census_data.csv")
+  
