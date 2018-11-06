@@ -11,6 +11,11 @@
 ## first created 24 Oct 2018
 ## manually fixed those lines where breeding success >100% - some nests were not counted
 
+
+## found major problem in triplicate counts to be added to Access database on 6 Nov 2018
+## major troubleshoot to prevent duplication/triplication of records
+
+
 library(tidyverse)
 library(data.table)
 library(lubridate)
@@ -79,6 +84,7 @@ unique(summvert$Filename)
 ## PART 4: ENSURE DATA INTEGRITY WITH DATA BASE - LOCATIONS
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 summvert<-fread("Gough_Counts_tobe_dated.csv")
+dim(summvert)
 usedlocs<-unique(summvert$Colony)
 
 ### identify locations not in database
@@ -145,6 +151,7 @@ summvert$Colony[is.na(summvert$Colony)]<-"Unknown"
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 
 summvert <- summvert %>% mutate(Date=dmy(DATE))
+summvert %>% filter(is.na(Date))
 
 ### FOR TRISTAN ALBATROSS, COUNTS OF ADULT ARE THE SAME AS AON
 summvert$COHORT[summvert$Species=="TRAL" & summvert$COHORT=="AD"]<-"AON"
@@ -179,6 +186,8 @@ summvert$Date[misscols] <- unknowns$Date  ### this is a dangerous replacement as
 #   left_join(unknowns,by=c("Species","Colony","Year","COHORT")) %>%        ### DID NOT WORK BECAUSE JOIN CREATED MORE ROWS
 #   select(Date.y)
 
+summvert %>% filter(is.na(Date))
+dim(summvert)
 
 
 
@@ -186,17 +195,20 @@ summvert$Date[misscols] <- unknowns$Date  ### this is a dangerous replacement as
 ## PART 6: SPLIT THE TABLE INTO THE RIGHT FORMAT - SURVEYS AND COUNTS 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 
-unique(summvert$N)
+unique(summvert$Site)
 head(survDB)
 head(countDB)
 
 ### specify the surveys
 surveys<- summvert %>% mutate(Method=ifelse(Species %in% c("SOAL","TRAL","AYNA"),"SURV","COLO")) %>%
-  group_by(Colony, Site, DATE, Method) %>%
+  mutate(Site=gsub("[[:punct:]]","_" , Site,ignore.case = TRUE)) %>%
+  group_by(Colony, Site, Date, Method) %>%
   summarise(VisitID=sum(N)) %>%
   filter(!Colony=="")
 dim(surveys)
 head(surveys)
+
+summvert %>% filter(is.na(Date))
 
 ### create unique VisitID number
 startID<-max(survDB$VisitID)+1
@@ -204,14 +216,19 @@ surveys$VisitID<-seq(startID,max(survDB$VisitID)+dim(surveys)[1],1)
 
 
 ### specify the counts at those surveys
-summvert$Method<-ifelse(summvert$Species %in% c("SOAL","TRAL","AYNA"),"SURV","COLO")
-counts<- merge(summvert,surveys, by=c("Colony","DATE","Method"),all.x=T)
-counts<- counts %>% filter(!Colony=="") %>%
+## fixed on 6 Nov because 'merge' created duplicate entries
+
+counts <- summvert %>% mutate(Method=ifelse(Species %in% c("SOAL","TRAL","AYNA"),"SURV","COLO")) %>%
+  mutate(Site=gsub("[[:punct:]]","_" , Site,ignore.case = TRUE)) %>%
+  left_join(surveys,by=c("Colony","Site","Date","Method")) %>%
+  filter(!Colony=="") %>%
   mutate(Breed_Stage=ifelse(COHORT %in% c("AON","INCU","AD"),"INCU","CHIC")) %>%
-  select(VisitID,Species, Breed_Stage, COHORT, N, Colony, DATE, Method) 
+  group_by(VisitID,Species, Breed_Stage, COHORT) %>%
+  summarise(Number=sum(N)) %>%
+  select(VisitID,Species, Breed_Stage, COHORT, Number) 
 
 head(counts)
-
+dim(counts)
 
 
 
