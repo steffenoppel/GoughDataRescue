@@ -79,24 +79,75 @@ unique(nests$StageFound)
 nests$StageFound<-ifelse(nests$StageFound %in% c("AE","E","AIA","AA"),"INCU",ifelse(nests$StageFound %in% c("C","CC"),"CHIC",""))
 head(nests)
 
+
+
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+## PART 3: UPDATE NESTS OUTCOME BY LOOPING OVER EACH NEST
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+
+
 ### format the SUCCESS field
 unique(nests$Fledged)
-nests$SUCCESS<-ifelse(nests$Fledged>0,1,0)
-nests$LastStage<-ifelse(nests$SUCCESS=0,"FAIL",ifelse(nests$Hatched>0,"CHIC","INCU"))
-nests$Completed<-ifelse(is.na(nests$Fledged),,nests$SUCCESS)
-
-nests$StageFound<-ifelse(nests$StageFound %in% c("AE","E","AIA","AA"),"INCU",ifelse(nests$StageFound %in% c("C","CC"),"CHIC",""))
-head(nests)
+unique(nests$Hatched)
+unique(nests$DeadChick)
+unique(nests$Comments[is.na(nests$Fledged)])
 
 
 
+for (n in 1:dim(nests)[1]) {
+  
+  x<-nests[n,]
+  
+  ### first decide whether there are data on success
+  if(is.na(x$Fledged)){
+    
+    ### if no data on fledge, check whether nest has hatched
+    if(is.na(x$Hatched)){
+      
+      ### if no data at all, remove nest, otherwise SUCCESS=1
+      if(is.na(x$DeadChick)){nests<-nests[-n,]}else{
+        nests$SUCCESS[n]<-0
+        nests$LastStage[n]<-"FAIL"
+        nests$Completed[n]<-1}
+      
+      ### if data on hatching then call nest successful but incomplete
+    }else{if(x$Hatched==0){
+      nests$SUCCESS[n]<-0
+      nests$LastStage[n]<-"FAIL"
+      nests$Completed[n]<-1}else{
+        
+        ### if nest has hatched but chick is dead then SUCCess=0
+        nests$SUCCESS[n]<-ifelse(x$DeadChick==1,0,1)
+        nests$LastStage[n]<-ifelse(x$DeadChick==1,"FAIL","CHIC")
+        nests$Completed[n]<-ifelse(x$DeadChick==1,0,1)}}
+    
+    ### if there are data on fledged then SUCCESS = 1  
+    }else{if(x$Fledged==0){
+      nests$SUCCESS[n]<-0
+      nests$LastStage[n]<-"FAIL"
+      nests$Completed[n]<-1}else{
+        
+        ### if nest has hatched but chick is dead then SUCCess=0
+        nests$SUCCESS[n]<-1
+        nests$LastStage[n]<-ifelse(x$Hatched==1,"CHIC","INCU")
+        nests$Completed[n]<-0}
+    
+  } ## end loop over NA fledged
+  
+} ## end loop over all nests
 
 
 
-### ASSESS MISSING CRITICAL INFO AND REMOVE WORTHLESS VISITS
-dim(nests)
-visits<- visits %>% filter(!is.na(STATUS)) ### %>% select(Species, Year, STAGE, ADULT, CONTENT, Comments,Notes)  ### remove visits where nest status is unknown
-dim(visits)
+
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+## PART 4: QUICK SUMMARY AND COMMON SENSE CHECK
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+
+nests %>% filter(!is.na(SUCCESS)) %>%
+  group_by(Species,Year) %>%
+  summarise(n=length(NestID), succ=mean(SUCCESS))
 
 
 
@@ -105,83 +156,46 @@ dim(visits)
 
 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
-## PART 5: UPDATE NESTS OUTCOME IN DATABASE AND ADD NESTS NOT YET IN DATABASE
+## PART 5: FIX LOCATION DESCRIPTIONS TO MATCH DATABASE
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
-setwd("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\DATA\\GoughDataRescue")
-head(nestsRED)
-dim(nestsRED)
-
-### create table matching the database
-exportNEST<- nestsRED %>% mutate(Time="12:00") %>%
-  mutate(Nest_label=gsub("[-/' ]","" , NestID,ignore.case = TRUE)) %>% ### COMPLY WITH NEST LABEL STANDARDS - REMOVE ALL BLANKS AND SPECIAL SYMBOLS
-  mutate(Completed=ifelse(AssumedFledged==1,0,1))%>%
-  select(Nest_label,Species,Year,Colony,Site,Latitude,Longitude,DateFound,StageFound, DateLastAlive, DateLastChecked,LastStage,Completed,SUCCESS)
-
-### FIX LOCATIONS FOR KNOWN SPECIES ###
-
-exportNEST$Site[exportNEST$Species=="SGPE"]<-exportNEST$Colony[exportNEST$Species=="SGPE"]
-exportNEST$Colony[exportNEST$Species=="SGPE"]<-"Low Hump"
-exportNEST$Colony[exportNEST$Species=="GRPE"]<-"Gonydale"
-exportNEST$Colony[exportNEST$Species=="GRPE"]<-"Area 1"
-exportNEST$Site[exportNEST$Species=="MAPR"]<-exportNEST$Colony[exportNEST$Species=="MAPR"]
-exportNEST$Colony[exportNEST$Species=="MAPR"]<-"Prion Cave"
-exportNEST$Site[exportNEST$Species=="BBPR"]<-exportNEST$Colony[exportNEST$Species=="BBPR"]
-
-#exportNEST %>% filter(Species=="SOPE") %>% select(Colony,Site)
-
 
 
 ### identify locations not in database
-usedlocs<-unique(exportNEST$Colony)
-newlocs<-usedlocs[!(usedlocs %in% locDB$LocationName)]
-newlocs<-data.frame(bullshit=newlocs, LOCATION=NA)
-newlocs<-newlocs %>%
-  mutate(LOCATION=ifelse(grepl("Rivercrossing",bullshit,perl=T,ignore.case = T)==T,"Unknown",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("by paint store",bullshit,perl=T,ignore.case = T)==T,"Weather station",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("by Sagina shed",bullshit,perl=T,ignore.case = T)==T,"Weather station",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("in front of food store",bullshit,perl=T,ignore.case = T)==T,"Weather station",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("in front of lab",bullshit,perl=T,ignore.case = T)==T,"Weather station",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("Prion Cave",bullshit,perl=T,ignore.case = T)==T,"Prion Cave",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("to left of Skivvygat",bullshit,perl=T,ignore.case = T)==T,"Weather station",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("Blechnam bridge",bullshit,perl=T,ignore.case = T)==T,"Blechnum Bridge",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("Golden highway",bullshit,perl=T,ignore.case = T)==T,"Golden Highway",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("study",bullshit,perl=T,ignore.case = T)==T,"Unknown",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("control",bullshit,perl=T,ignore.case = T)==T,"Unknown",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("Area 3",bullshit,perl=T,ignore.case = T)==T,"Area 3",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("GLS Study Colony",bullshit,perl=T,ignore.case = T)==T,"Between the base and seal beach",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("inland Adm path",bullshit,perl=T,ignore.case = T)==T,"Admirals",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("area 2",bullshit,perl=T,ignore.case = T)==T,"Area 2",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("Seal Beach",bullshit,perl=T,ignore.case = T)==T,"Seal Beach",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("Snoekgat",bullshit,perl=T,ignore.case = T)==T,"Snoekgat",LOCATION)) %>%
-  mutate(LOCATION=ifelse(grepl("Tumbledown",tolower(bullshit),perl=T,ignore.case = T)==T,"Tumbledown",LOCATION)) %>% 
-  mutate(LOCATION=ifelse(grepl("Low Hump",tolower(bullshit),perl=T,ignore.case = T)==T,"Low Hump",LOCATION)) %>% 
-  mutate(LOCATION=ifelse(grepl("by balloon balcony",tolower(bullshit),perl=T,ignore.case = T)==T,"Weather station",LOCATION))
+usedlocs<-unique(nests$Colony)
+unique(nestsDB$Colony)
+usedlocs[!(usedlocs %in% nestsDB$Colony)]
+
+### re-assign Colony names that match database
+nests<- nests %>% mutate(Colony=ifelse(Colony=="Green Hill","Green Hill North",Colony)) %>%
+  mutate(Colony=ifelse(Colony=="Green Hill","Green Hill North",Colony)) %>%
+  mutate(Colony=ifelse(Colony=="Tafelkop path","Tafelkop",Colony)) %>%
+  mutate(Colony=ifelse(Colony=="Way to plot 13","Sea cliff",Colony)) %>%
+  mutate(Colony=ifelse(Colony=="Way to Low Hump","Low Hump",Colony)) %>%
+  mutate(Colony=ifelse(Colony=="Diesel Cove-Skivvygat","Cliff to south of view point in Snoek Gat (where c",Colony)) %>%
+  mutate(Colony=ifelse(Colony=="Skivvygat-Snoekgat","Snoekgat",Colony)) %>%
+  mutate(Colony=ifelse(Colony=="1","Helipad",Colony)) %>%
+  mutate(Colony=ifelse(Colony=="2","Blechnum Bridge",Colony)) %>%
+  mutate(Colony=ifelse(is.na(Colony),"Gonydale",Colony)) 
+
+### check nests without Colony location
+nests %>% filter(is.na(Colony))
 
 
 
-
-### UPDATE LOCATIONS IN SURVEYS
-
-exportNEST<- exportNEST %>% mutate(Site=ifelse(Site %in% c("",NA),Colony,Site)) %>%
-  mutate(Colony=ifelse(Colony %in% locDB$LocationName,Colony,newlocs$LOCATION[match(Colony,newlocs$bullshit)]))
-head(exportNEST)
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+## PART 6: ADD NESTS TO DATABASE
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+setwd("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\DATA\\GoughDataRescue")
 
 
-
-### match to check which nests already exist
-# head(nestsDB)
-# head(exportNEST)
-# updNests<-exportNEST %>% filter(Nest_label %in% nestsDB$Nest_label)
-# updNestsDB<-nestsDB %>% filter(Nest_label %in% updNests$Nest_label)
-# updNests[!(updNests$SUCCESS==updNestsDB$SUCCESS),]      ### these nests differ between the output here and the DB and need to be updated
-
-### export the nests that need to be updated
-#fwrite(updNests[!(updNests$SUCCESS==updNestsDB$SUCCESS),],"Gough_Nests_tobe_updated.csv")
+### create table matching the database
+exportNEST<- nests %>% mutate(Time="12:00") %>%
+  mutate(Nest_label=gsub("[-/' ]","" , NestID,ignore.case = TRUE)) %>% ### COMPLY WITH NEST LABEL STANDARDS - REMOVE ALL BLANKS AND SPECIAL SYMBOLS
+  select(Nest_label,Species,Year,Colony,Site,Latitude,Longitude,FirstRecord,StageFound, DateLastAlive, DateLastChecked,LastStage,Completed,SUCCESS)
 
 
 ### export the nests that need to be added
-addNests<-exportNEST ##%>% filter(!(Nest_label %in% nestsDB$Nest_label)) ## we hope to have excluded that manually
-fwrite(addNests,"Gough_Nests_tobe_added.csv")
+fwrite(exportNEST,"Gough_Nests_tobe_added_6Nov2018.csv")
 
 
 
