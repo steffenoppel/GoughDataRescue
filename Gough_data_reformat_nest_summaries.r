@@ -93,7 +93,7 @@ unique(nests$Hatched)
 unique(nests$DeadChick)
 unique(nests$Comments[is.na(nests$Fledged)])
 
-
+delete<-vector()
 
 for (n in 1:dim(nests)[1]) {
   
@@ -106,7 +106,7 @@ for (n in 1:dim(nests)[1]) {
     if(is.na(x$Hatched)){
       
       ### if no data at all, remove nest, otherwise SUCCESS=1
-      if(is.na(x$DeadChick)){nests<-nests[-n,]}else{
+      if(is.na(x$DeadChick)){delete<-c(delete,n)}else{
         nests$SUCCESS[n]<-0
         nests$LastStage[n]<-"FAIL"
         nests$Completed[n]<-1}
@@ -118,9 +118,9 @@ for (n in 1:dim(nests)[1]) {
       nests$Completed[n]<-1}else{
         
         ### if nest has hatched but chick is dead then SUCCess=0
-        nests$SUCCESS[n]<-ifelse(x$DeadChick==1,0,1)
-        nests$LastStage[n]<-ifelse(x$DeadChick==1,"FAIL","CHIC")
-        nests$Completed[n]<-ifelse(x$DeadChick==1,0,1)}}
+        nests$SUCCESS[n]<-ifelse(is.na(nests$DeadChick),1,0)
+        nests$LastStage[n]<-ifelse(is.na(nests$DeadChick),"CHIC","INCU")
+        nests$Completed[n]<-ifelse(is.na(nests$DeadChick),0,1)}}
     
     ### if there are data on fledged then SUCCESS = 1  
     }else{if(x$Fledged==0){
@@ -138,7 +138,11 @@ for (n in 1:dim(nests)[1]) {
 } ## end loop over all nests
 
 
-
+## check nests without much information
+dim(nests)
+nests<-nests[-delete,]
+dim(nests)
+nests %>% filter(is.na(SUCCESS))
 
 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
@@ -154,11 +158,9 @@ nests %>% filter(!is.na(SUCCESS)) %>%
 
 
 
-
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 ## PART 5: FIX LOCATION DESCRIPTIONS TO MATCH DATABASE
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
-
 
 ### identify locations not in database
 usedlocs<-unique(nests$Colony)
@@ -182,6 +184,7 @@ nests %>% filter(is.na(Colony))
 
 
 
+
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 ## PART 6: ADD NESTS TO DATABASE
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
@@ -190,8 +193,11 @@ setwd("C:\\STEFFEN\\RSPB\\UKOT\\Gough\\DATA\\GoughDataRescue")
 
 ### create table matching the database
 exportNEST<- nests %>% mutate(Time="12:00") %>%
+  
+  
+  
   mutate(Nest_label=gsub("[-/' ]","" , NestID,ignore.case = TRUE)) %>% ### COMPLY WITH NEST LABEL STANDARDS - REMOVE ALL BLANKS AND SPECIAL SYMBOLS
-  select(Nest_label,Species,Year,Colony,Site,Latitude,Longitude,FirstRecord,StageFound, DateLastAlive, DateLastChecked,LastStage,Completed,SUCCESS)
+  select(Nest_label,Species,Year,Colony,Site,FirstRecord,StageFound, DateLastAlive, DateLastChecked,LastStage,Completed,SUCCESS)
 
 
 ### export the nests that need to be added
